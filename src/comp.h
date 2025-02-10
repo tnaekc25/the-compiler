@@ -12,5 +12,4 @@
 #include "structs.h"
 #include "funcs.h"
 
-
 #endif

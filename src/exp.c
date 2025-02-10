@@ -2,7 +2,7 @@
 #include "comp.h"
 
 
-struct exp *new_Var(struct varinf *inf) {
+struct exp *new_Var(hinfo *inf) {
 
 	struct exp *np = (struct exp*)malloc(sizeof(struct exp));
 	np -> typ = VAR;

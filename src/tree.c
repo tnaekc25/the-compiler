@@ -12,7 +12,7 @@ void printExpTree(struct exp *node, int space) {
 	}
 
 	if (node -> typ == VAR) 
-		printf("%d", (int)node -> exps._var.inf -> addr);
+		printf("<%d>", (int)node -> exps._var.inf -> typs._var.addr);
 	else if (node -> typ == FUNC) {
 
 		int j;
@@ -64,6 +64,7 @@ void printStatTree(struct stat *node, int space) {
 
 	int i;
 
+	if (!node) return;
 
 	if (node -> typ <= ELSE && node -> typ >= WHILE) {
 		
@@ -93,7 +94,7 @@ void printStatTree(struct stat *node, int space) {
 		printf("EXP");
 	}
 
-	if (node -> next) 
+	if (node -> next)
 		printStatTree(node -> next, space+5);
 }
 

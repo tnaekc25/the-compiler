@@ -40,17 +40,21 @@ void delete_Trie(struct trienode *root) {
 
 enum StatTyp getToken(const char *token, struct trienode *node, size_t *s) {
 
+	size_t ref = *s;
+
 	while (istoken(token[*s])) {
 
 		if (node -> arr[token[*s]-97])
 			node = node -> arr[token[*s]-97];
-		else
+		else {
+			*s = ref;
 			return NAN;
+		}
 
 		(*s)++;
 	}
 
-	return (node && node -> key) ? node -> v : NAN;
+	return (node && node -> key) ? node -> v : (*s = ref, NAN);
 }
 
 
@@ -66,6 +70,7 @@ struct trienode *buildStatTrie() {
 	insertTrie("float", root, FLTDEC);
 	insertTrie("string", root, STRDEC);
 	insertTrie("bool", root, BOLDEC);
+	insertTrie("void", root, VOIDDEC);
 
 	return root;
 }

@@ -3,15 +3,38 @@
 #define _TYPES_H_
 
 
-struct varinf {
+typedef struct _varinf {
 	int addr;
-	enum StatTyp type;
-	unsigned int block;
+} varinf;
 
-};
+
+typedef struct _funcinf {
+	struct stat *jump;
+	
+	size_t argc;
+	struct _hinfo **args;
+
+	int retaddr;
+
+} funcinf;
+
+
+typedef struct _hinfo {
+
+	bool used, isvar;
+	enum StatTyp type;
+
+	union {
+		varinf _var;
+		funcinf _func;
+
+	} typs;
+} hinfo;
+
+
 
 struct varexp {
-	struct varinf *inf;
+	hinfo *inf;
 };
 
 struct funcexp {
@@ -58,7 +81,7 @@ struct exp {
 };
 
 
-struct exp *new_Var(struct varinf *inf);
+struct exp *new_Var(hinfo *inf);
 struct exp *new_Func(const char *name, size_t argc);
 struct exp *new_Int(long int val);
 struct exp *new_Flt(long double val);

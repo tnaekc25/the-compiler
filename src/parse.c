@@ -2,6 +2,10 @@
 #include "comp.h"
 
 
+extern struct trienode *stattrie;
+int testc = 0;
+
+
 struct exp *getexptree(const char *line, size_t start, size_t end, HashTable *vartable) {
 
 	int sp, ep;
@@ -14,7 +18,6 @@ struct exp *getexptree(const char *line, size_t start, size_t end, HashTable *va
 
 	struct exp *qe[CONT_SIZE], *temp;
 	size_t back = 0, front  = 0;
-
 
 	while ((end < 0 || i <= end) && (c = line[i])) {
 
@@ -192,34 +195,38 @@ struct exp *getexptree(const char *line, size_t start, size_t end, HashTable *va
 
 		/*process varname or function*/
 		else if (isname(c)) {
-			sp = i;
-			do c = line[++i]; while (isname(c) || isnum(c));
-			ep = --i;
 
-			if (strncmp(line+sp, "true", ep-sp-1) == 0)
+			char *name;
+			size_t cc = 0, ref;
+
+			while(isname(line[i+(cc++)]));
+			name = (char*)malloc(sizeof(char)*(ref=cc));
+			name[--cc] = 0;
+			while (cc--) name[cc] = line[i+cc];
+			i+=ref-1;
+
+
+			if (strcmp(name, "true") == 0)
 				qe[back++] = new_Bool(1);
 
-			else if (strncmp(line+sp, "false", ep-sp-1) == 0)
+			else if (strcmp(name, "false") == 0)
 				qe[back++] = new_Bool(0);
-			
 			
 			else {
 				/*process varname*/
-				if (line[i] && line[i+1] != '(') {
+				if (line[i] && line[i] != '(') {
+					hinfo *inf;					
 
-					char *name;
-					size_t cc = 0;
-					struct varinf *inf;
-
-					while(isname(line[i+(cc++)]));
-					name = (char*)malloc(sizeof(char)*cc);
-					name[--cc] = 0;
-					while (cc--) name[cc] = line[i+cc];
-
-					if (inf = retfTable(vartable, name))
+					if ((inf = getfTable(vartable, name)) && inf -> isvar) {
+						inf -> used = true;
 						qe[back++] = new_Var(inf);
+					}
+
+					else if (inf && inf -> isvar == false)
+						printf("<%s> IS NOT VARNAME\n", name);
+
 					else
-						return NULL;
+						printf("VARNAME <%s> NOT FOUND\n", name);
 				}
 				
 				/*process function*/
@@ -297,8 +304,7 @@ struct exp *getexptree(const char *line, size_t start, size_t end, HashTable *va
 
 
 
-struct stat *getstat(const char *line, struct trienode *trie, HashTable *vartable,
- struct stat *prev, unsigned int blockid) {
+struct stat *getstat(char *line, HashTable *vartable, FILE *fp) {
 
 	size_t i = 0, sp, ep;
 	char c;
@@ -306,7 +312,10 @@ struct stat *getstat(const char *line, struct trienode *trie, HashTable *vartabl
 	while ((c = line[i])) {
 
 		if (istoken(c)) {
-			enum StatTyp typ = getToken(line, trie, &i);
+			enum StatTyp typ = getToken(line, stattrie, &i);
+			struct stat *retstat;
+
+			/*CONDITIONAL STATEMENTS*/
 
 			if (typ >= WHILE && typ <= IF) {
 
@@ -315,53 +324,131 @@ struct stat *getstat(const char *line, struct trienode *trie, HashTable *vartabl
 				while ((c = line[i]) != ')') i++;
 				ep = i-1;
 
-				if (prev)
-					return (prev -> next = new_Stat(getexptree(line, sp, ep, vartable), typ));
-				else 
-					return new_Stat(getexptree(line, sp, ep, vartable), typ);
+				retstat = new_Stat(getexptree(line, sp, ep, vartable), typ);
+
+				while (isempty(line[++i]));
+
+				if (istoken(line[i]))
+					retstat -> stats._para._jump = getstat(line+i, vartable, fp);
+				else
+					retstat -> stats._para._jump = parseblock(fp, line, vartable, NULL);
+
+				return retstat;
 			}
 
 			else if (typ == ELSE) {
 
-				if (prev)
-					return (prev -> next = new_Stat(NULL, ELSE));
-				else 
-					return (new_Stat(NULL, ELSE));
+				retstat = new_Stat(NULL, ELSE);
+
+				while (isempty(line[++i]));
+
+				if (istoken(line[i])) retstat -> stats._para._jump = getstat(line+i, vartable, fp);
+				else
+					retstat -> stats._para._jump = parseblock(fp, line, vartable, NULL);
+
+				return retstat;
 			}
 
-			else if (typ >= INTDEC && typ <= BOLDEC) {
+			/*!CONDITIONAL STATEMENTS*/
+
+			else if (typ >= INTDEC && typ <= VOIDDEC) {
 
 				char *name;	
-				size_t cc = 0;
-				struct varinf *inf;
+				size_t cc = 0, ref;
+				hinfo *inf;
+				struct stat *jumpstat;
 
-				printf("VAR ");
 				while (isempty((c = line[i]))) i++;
 				if (line[i] == '*') {
 					printf("POINTER ");
 					while (isempty((c = line[++i])));
 				} 
-				
+
 				while(isname(line[i+(cc++)]));
-				name = (char*)malloc(sizeof(char)*cc);
+				name = (char*)malloc(sizeof(char)*(ref=cc));
 				name[--cc] = 0;
 				while (cc--) name[cc] = line[i+cc];
+				i+=ref-1;
 
-				inf = (struct varinf*)malloc(sizeof(struct varinf));
-				inf -> addr = -1;
-				inf -> type = typ;
-				inf -> block = blockid;
 
-				printf("<%s> ", name);
-				printf("of block: %d ", blockid);
+				/*FUNCTION DECLARATION*/
 
-				if (retfTable(vartable, name)) {
-					printf("NAME IN USE!\n");
-					return NULL;
+				if (line[i] && line[i] == '(') {
+
+					size_t argc = 0, j = i+1, cc, ref, k = 0;
+					hinfo **args;
+					enum StatTyp ptyp;
+					char *pname;
+
+					HashTable *paramtable = new_HashTable(TABLE_SIZE);
+
+
+					while (line[j] != ')')
+						if (line[++j] == ',' || line[j] == ')')
+							argc++;
+
+					args = (hinfo**)malloc(sizeof(hinfo*)*argc);
+
+					j = i+1;
+
+					printf("FUNC \"%s\" with %d PARAMS: ", name, (int)argc);
+
+					while (line[j] != ')')
+						if (line[j] != ',' && line[j] != ')' && !isempty(line[j])) {
+
+							ptyp = getToken(line, stattrie, &j);
+							
+							if (ptyp >= INTDEC && ptyp <= BOLDEC) {
+								while(isempty(line[j])) j++;
+
+								cc = 0;
+
+								while(isname(line[j+(cc++)]));
+								pname = (char*)malloc(sizeof(char)*(ref=cc));
+								pname[--cc] = 0;
+								while (cc--) pname[cc] = line[j+cc];
+								j+=ref-1;
+
+								printf("[%s] ", pname);
+
+								inf = new_varinf(-1, ptyp);
+								args[k++] = inf;
+
+								if (pushTable(paramtable, pname, inf, 0))
+									printf("NAME IN USE!");
+							}
+
+							else;
+						} else j++;
+
+					printf("\n");
+
+					i = j+1;
+					jumpstat = parseblock(fp, line, vartable, paramtable);
+					inf = new_funcinf(jumpstat, argc, args, typ);
+
+					printf("->\n{{{\n\n");
+					printStatTree(jumpstat, 5);
+					printf("\n\n}}}");
+
+					if (pushTable(vartable, name, inf, 0))
+						printf("NAME IN USE!");
+
+					deleteTable(paramtable);
+				}
+
+				/*!FUNCTION DECLARATION*/
+
+
+				else {
+					printf("VAR %s", name);
+
+					inf = new_varinf(-1, typ);
+					if (pushTable(vartable, name, inf, 0))
+						printf("NAME IN USE!");
 				}
 
 				printf("\n");
-				pushTable(vartable, name, inf);
 
 				return NULL;
 			}
@@ -371,15 +458,15 @@ struct stat *getstat(const char *line, struct trienode *trie, HashTable *vartabl
 			else if (typ == NAN) {
 				
 				struct exp *temp = getexptree(line, 0, -1, vartable);
+				/*process expressions*/
 
-				if (temp) {
+				if (temp)
+					return new_Stat(temp, EXP);
 
-					if (prev)
-						return (prev -> next = new_Stat(temp, EXP));
-					else 
-						return new_Stat(temp, EXP);
-				
-				}
+				else;
+
+
+				/*!process expressions*/
 			}
 		}
 
@@ -392,39 +479,55 @@ struct stat *getstat(const char *line, struct trienode *trie, HashTable *vartabl
 
 
 
-struct stat *parseblock(FILE *fp, char *holder, struct trienode *stattrie, HashTable *vartable) {
+struct stat *parseblock(FILE *fp, char *holder, HashTable *prevtable, HashTable *extra) {
 
 	struct stat *root = NULL;
 	struct stat *prev = root;
 
 	char c = fgetc(fp);
 	int k = 0;
+	struct stat *retstat;
+
+	/*create vartable*/
+	HashTable *vartable = new_HashTable(TABLE_SIZE);
+
+	/*import to vartable*/
+
+	if (prevtable) {
+		int i;
+
+		for (i = 0;i < prevtable -> capacity;i++)
+			if (prevtable -> arr[i])
+				pushTable(vartable, prevtable -> arr[i] -> skey,
+			 	prevtable -> arr[i] -> inf, 1);
+	}
+
+	if (extra) {
+		int i;
+
+		for (i = 0;i < extra -> capacity;i++)
+			if (extra -> arr[i])
+				pushTable(vartable, extra -> arr[i] -> skey,
+			 	extra -> arr[i] -> inf, 0);
+	}
+	/*!import to vartable*/
 
 
 	while (c != EOF && c != '}') {
 
-		if (c == ';' || c == '{') {
+		if (c == ';' || c == '{') { 
 			holder[k] = 0;
 
-			if (root)
-				prev = getstat(holder, stattrie, vartable, prev, 0);
-			else
-				root = prev = getstat(holder, stattrie, vartable, prev, 0);
+			if ((retstat = getstat(holder, vartable, fp))) {
+				if (root)
+					prev -> next = retstat;
+				else
+					root = retstat;
+
+				prev = retstat;
+			}
 
 			k = 0;
-
-			if (c == '{') {
-
-				if (root) {
-					if (prev -> typ >= WHILE && prev -> typ <= ELSE)
-						prev -> stats._para._jump = parseblock(fp, holder, stattrie, vartable);				
-					else
-						prev = parseblock(fp, holder, stattrie, vartable);
-				}
-
-				else
-					root = prev = parseblock(fp, holder, stattrie, vartable);
-			}
 		}
 
 		else
@@ -432,6 +535,8 @@ struct stat *parseblock(FILE *fp, char *holder, struct trienode *stattrie, HashT
 
 		c = fgetc(fp);
 	}
+
+	delete_HashTable(vartable);
 
 	return root;
 }

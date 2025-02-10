@@ -1,28 +1,66 @@
 
 #include "comp.h"
 
-HashTable *new_HashTable(size_t capacity) {
 
-	HashTable *np = (HashTable*)malloc(sizeof(HashTable));
 
-	np -> capacity = capacity;
-	np -> size = 0;
 
-	np -> arr = (pair**)calloc(capacity, sizeof(pair*));
-	np -> dummy = (pair*)malloc(sizeof(pair));
+/*varinf*/
+
+hinfo *new_varinf(int addr, enum StatTyp type) {
+
+	hinfo *np = (hinfo*)malloc(sizeof(hinfo));
+	np -> typs._var.addr = addr;
+	
+	np -> type = type;
+	np -> used = false;
+	np -> isvar = true;
 
 	return np;
 }
 
-pair *new_Pair(char *str, struct varinf *inf) {
+
+/*funcinf*/
+
+hinfo *new_funcinf(struct stat *jump, size_t argc,
+ hinfo **args, enum StatTyp type) {
+
+	hinfo *np = (hinfo*)malloc(sizeof(hinfo));
+
+	np -> typs._func.jump = jump;
+	np -> typs._func.argc = argc;
+	np -> typs._func.args = args;
+
+
+	np -> type = type;
+	np -> used = false;
+	np -> isvar = false;
+
+	return np;
+}
+
+
+
+/*Pair*/
+
+pair *new_Pair(char *str, hinfo *inf, bool imported) {
 
 	pair *np = (pair*)malloc(sizeof(pair));
 
-	np -> key = str;
-	np -> val = inf;
+	np -> skey = str;
+	np -> inf = inf;
+	np -> imported = imported;
 
 	return np;
 }
+
+void delete_Pair(pair *p) {
+
+	if (p -> imported == false)
+		free(p -> skey);
+	free(p);
+}
+
+/*!Pair*/
 
 
 size_t hash(char *str, size_t capacity) {
@@ -35,58 +73,53 @@ size_t hash(char *str, size_t capacity) {
 	return val % capacity;
 }
 
-void pushTable(HashTable *tp, char *str, struct varinf *inf) {
 
-	size_t key = hash(str, tp -> capacity), i = 1;
 
-	if (tp -> size / (float)tp -> capacity > 0.5)
-		resizeTable(tp);
+/*Destructor - Constructor */
 
-	while (tp -> arr[key] && tp -> arr[key] != tp -> dummy) {
-		key = (key + i*i) % (tp -> capacity);
-		i++;
-	}
+HashTable *new_HashTable(size_t capacity) {
 
-	tp -> arr[key] = new_Pair(str, inf);
+	HashTable *np = (HashTable*)malloc(sizeof(HashTable));
 
-	tp -> size++;
+	np -> capacity = capacity;
+	np -> size = 0;
+
+	np -> arr = (pair**)calloc(capacity, sizeof(pair*));
+
+	return np;
 }
 
+void delete_HashTable(HashTable *tp) {
 
-struct varinf *retfTable(HashTable *tp, char *str) {
+	int i;
 
-	size_t key = hash(str, tp -> capacity), i = 1;
+	for (i = 0;i < tp -> capacity;i++)
+		if (tp -> arr[i]) {
+			
+			if (tp -> arr[i] -> inf 
+				&& tp -> arr[i] -> inf -> used == false
+				&& tp -> arr[i] -> imported == false) 
+					free(tp -> arr[i] -> inf);
 
-	while (tp -> arr[key])
-		if (strcmp(tp -> arr[key] -> key, str) == 0)
-			return tp -> arr[key] -> val;
-		else {
-			key = (key + i*i) % tp -> capacity;
-			i++;
+			delete_Pair(tp -> arr[i]);
 		}
 
-	return NULL;
+	free(tp -> arr);
 }
 
+void deleteTable(HashTable *tp) {
 
-int remvfTable(HashTable *tp, char *str) {
+	int i;
 
-	size_t key = hash(str, tp -> capacity), i = 1;
+	for (i = 0;i < tp -> capacity;i++)
+		if (tp -> arr[i])
+			free(tp -> arr[i]);
 
-	while (tp -> arr[key])
-		if (strcmp(tp -> arr[key] -> key, str) == 0) {
-			free(tp -> arr[key]);
-			tp -> arr[key] = tp -> dummy;
-			return 1;
-		}
-
-		else {
-			key = (key + i*i) % tp -> capacity;
-			i++;
-		}
-
-	return -1;
+	free(tp -> arr);
 }
+
+/*!Destructor - Constructor */
+
 
 
 void resizeTable(HashTable *tp) {
@@ -100,29 +133,67 @@ void resizeTable(HashTable *tp) {
 	tp -> arr = (pair**)calloc(tp -> capacity, sizeof(pair*));
 
 	for (i = 0;i < oldc;i++)
-		if (temp[i] && temp[i] != tp -> dummy) {
-			pushTable(tp, temp[i] -> key, temp[i] -> val);
-			free(temp[i]);
+		if (temp[i]) {
+			pushTable(tp, temp[i] -> skey, temp[i] -> inf, temp[i] -> imported);
+			delete_Pair(temp[i]);
 		}
 
 	free(temp);
 }
 
 
-void delete_HashTable(HashTable *tp) {
+bool pushTable(HashTable *tp, char *str, hinfo *inf, bool imported) {
 
-	int i;
+	size_t key, i = 1;
+	bool newp = true;
 
-	for (i = 0;i < tp -> capacity;i++)
-		if (tp -> arr[i] && tp -> arr[i] != tp -> dummy) {
-			free(tp -> arr[i] -> key);
-			free(tp -> arr[i] -> val);
-			free(tp -> arr[i]);
+	if (tp -> size / (float)tp -> capacity > MAX_LOAD)
+		resizeTable(tp);
+
+	key = hash(str, tp -> capacity);
+
+	while (tp -> arr[key]) {
+
+		if (strcmp(tp -> arr[key] -> skey, str) == 0) {
+			if (tp -> arr[key] -> imported) 
+				{newp = false; break;}
+
+			else return 1;
 		}
-		
-	free(tp -> arr);
-	free(tp -> dummy);
+
+		key = (key + i*i) % (tp -> capacity);
+		i++;
+	}
+
+	if (newp)
+		tp -> arr[key] = new_Pair(str, inf, imported);
+	else {
+		tp -> arr[key] -> skey = str;
+		tp -> arr[key] -> imported = 0;
+		tp -> arr[key] -> inf = inf;
+	}
+
+	tp -> size++;
+
+	return 0;
 }
+
+
+hinfo *getfTable(HashTable *tp, char *str) {
+
+	size_t key = hash(str, tp -> capacity), i = 1;
+
+	while (tp -> arr[key])
+		if (strcmp(tp -> arr[key] -> skey, str) == 0)
+			return tp -> arr[key] -> inf;
+		else {
+			key = (key + i*i) % tp -> capacity;
+			i++;
+		}
+
+	return NULL;
+}
+
 
 
 void printTable(HashTable *tp) {
@@ -132,18 +203,9 @@ void printTable(HashTable *tp) {
 	printf("\n");
 
 	for (;i < tp -> capacity;i++)
-		if (tp -> arr[i] == tp -> dummy)
-			printf("%d DUMMY\n", i);
-		else if (tp -> arr[i])
-			printf("%d %s -> %d\n", i, tp -> arr[i] -> key,
-			 -1);
+		if (tp -> arr[i] && tp -> arr[i] -> inf -> isvar)
+			printf("%d <%d> %s -> %d\n", i, tp -> arr[i] -> imported,
+			 tp -> arr[i] -> skey, tp -> arr[i] -> inf -> typs._var.addr);
 		else
 			printf("%d NULL\n", i);
 }
-
-
-
-
-
-
-

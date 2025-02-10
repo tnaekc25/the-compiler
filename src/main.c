@@ -2,23 +2,22 @@
 #include "comp.h"
 
 
+struct trienode *stattrie;
+
 int main() {
 
 	FILE *fp = fopen("test.the", "r");
 
-	struct trienode *stattrie = buildStatTrie();
-	HashTable *vartable = new_HashTable(TABLE_SIZE);
-	
 	char holder[CONT_SIZE];
 	struct stat *root;
 
+	stattrie = buildStatTrie();
 	if (!fp) return 1;
 
-	root = parseblock(fp, holder, stattrie, vartable);
+	root = parseblock(fp, holder, NULL, NULL);
 	printStatTree(root, 5);
 
 	delete_Trie(stattrie);
-	delete_HashTable(vartable);
 
 	printf("\n\nnoseg");
 
